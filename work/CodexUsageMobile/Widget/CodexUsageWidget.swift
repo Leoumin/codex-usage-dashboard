@@ -36,7 +36,17 @@ struct UsageProvider: TimelineProvider {
         let cached = cachedSnapshot()
         do {
             let accessGroup = Bundle.main.object(forInfoDictionaryKey: "CodexUsageKeychainAccessGroup") as? String
-            let credential = try KeychainCredentialStore(accessGroup: accessGroup).load()
+            let mobileStore = KeychainCredentialStore(
+                accessGroup: accessGroup,
+                service: CodexKeychainService.mobileCredential,
+                synchronizable: false
+            )
+            let credential: CodexCredential
+            if let mobile = try? mobileStore.load() {
+                credential = mobile
+            } else {
+                credential = try KeychainCredentialStore(accessGroup: accessGroup).load()
+            }
             let fresh = try await CodexUsageService().fetch(credential: credential)
             try SnapshotStore(suiteName: appGroup)?.save(fresh)
             return UsageEntry(date: Date(), snapshot: fresh, status: nil)

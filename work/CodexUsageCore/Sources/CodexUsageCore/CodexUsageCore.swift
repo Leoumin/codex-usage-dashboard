@@ -13,6 +13,12 @@ public struct CodexCredential: Codable, Equatable, Sendable {
     }
 }
 
+public enum CodexKeychainService {
+    public static let syncedCredential = "com.zhaoxh.codexusage.credentials"
+    public static let mobileCredential = "com.zhaoxh.codexusage.mobile.credentials"
+    public static let mobileRefreshToken = "com.zhaoxh.codexusage.mobile.refresh-token"
+}
+
 public enum CodexAuthFile {
     public static func read(data: Data) throws -> CodexCredential {
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -198,15 +204,18 @@ public struct KeychainCredentialStore: Sendable {
     private let accessGroup: String?
     private let service: String
     private let account: String
+    private let synchronizable: Bool
 
     public init(
         accessGroup: String? = nil,
-        service: String = "com.zhaoxh.codexusage.credentials",
-        account: String = "codex"
+        service: String = CodexKeychainService.syncedCredential,
+        account: String = "codex",
+        synchronizable: Bool = true
     ) {
         self.accessGroup = accessGroup
         self.service = service
         self.account = account
+        self.synchronizable = synchronizable
     }
 
     public func save(_ credential: CodexCredential) throws {
@@ -243,17 +252,81 @@ public struct KeychainCredentialStore: Sendable {
         return try decoder.decode(CodexCredential.self, from: data)
     }
 
+    public func delete() throws {
+        let status = SecItemDelete(baseQuery() as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw CodexUsageError.keychain(status)
+        }
+    }
+
     private func baseQuery() -> [CFString: Any] {
         var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: account,
-            kSecAttrSynchronizable: kCFBooleanTrue as Any
+            kSecAttrSynchronizable: synchronizable ? kCFBooleanTrue as Any : kCFBooleanFalse as Any
         ]
         if let accessGroup, !accessGroup.isEmpty {
             query[kSecAttrAccessGroup] = accessGroup
         }
         return query
+    }
+}
+
+public struct KeychainSecretStore: Sendable {
+    private let service: String
+    private let account: String
+
+    public init(service: String, account: String = "codex") {
+        self.service = service
+        self.account = account
+    }
+
+    public func save(_ value: String) throws {
+        let query = baseQuery()
+        let data = Data(value.utf8)
+        let status = SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var item = query
+            item[kSecValueData] = data
+            item[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let addStatus = SecItemAdd(item as CFDictionary, nil)
+            guard addStatus == errSecSuccess else { throw CodexUsageError.keychain(addStatus) }
+            return
+        }
+        guard status == errSecSuccess else { throw CodexUsageError.keychain(status) }
+    }
+
+    public func load() throws -> String {
+        var query = baseQuery()
+        query[kSecReturnData] = kCFBooleanTrue
+        query[kSecMatchLimit] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { throw CodexUsageError.missingCredential }
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8),
+              !value.isEmpty else {
+            throw CodexUsageError.keychain(status)
+        }
+        return value
+    }
+
+    public func delete() throws {
+        let status = SecItemDelete(baseQuery() as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw CodexUsageError.keychain(status)
+        }
+    }
+
+    private func baseQuery() -> [CFString: Any] {
+        [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecAttrSynchronizable: kCFBooleanFalse as Any
+        ]
     }
 }
 
@@ -324,9 +397,210 @@ public struct CodexUsageService: Sendable {
     }
 }
 
+public struct CodexDeviceCode: Equatable, Sendable {
+    public let verificationURL: URL
+    public let userCode: String
+    fileprivate let deviceAuthID: String
+    fileprivate let interval: TimeInterval
+}
+
+public struct CodexOAuthTokens: Equatable, Sendable {
+    public let accessToken: String
+    public let refreshToken: String
+    public let accountID: String?
+
+    public var credential: CodexCredential {
+        CodexCredential(accessToken: accessToken, accountID: accountID, lastRefresh: Date())
+    }
+}
+
+public struct CodexOAuthService: Sendable {
+    private static let clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+    private let session: URLSession
+    private let issuer: URL
+
+    public init(
+        session: URLSession = .shared,
+        issuer: URL = URL(string: "https://auth.openai.com")!
+    ) {
+        self.session = session
+        self.issuer = issuer
+    }
+
+    public func requestDeviceCode() async throws -> CodexDeviceCode {
+        let request = try jsonRequest(
+            path: "/api/accounts/deviceauth/usercode",
+            body: ["client_id": Self.clientID]
+        )
+        let data = try await send(request)
+        let response = try JSONDecoder().decode(DeviceCodeResponse.self, from: data)
+        guard !response.deviceAuthID.isEmpty, !response.userCode.isEmpty else {
+            throw CodexUsageError.invalidResponse
+        }
+        return CodexDeviceCode(
+            verificationURL: issuer.appending(path: "codex/device"),
+            userCode: response.userCode,
+            deviceAuthID: response.deviceAuthID,
+            interval: response.interval
+        )
+    }
+
+    public func completeDeviceCode(_ deviceCode: CodexDeviceCode) async throws -> CodexOAuthTokens {
+        let deadline = Date().addingTimeInterval(15 * 60)
+        while Date() < deadline {
+            let request = try jsonRequest(
+                path: "/api/accounts/deviceauth/token",
+                body: [
+                    "device_auth_id": deviceCode.deviceAuthID,
+                    "user_code": deviceCode.userCode
+                ]
+            )
+            do {
+                let data = try await send(request)
+                let code = try JSONDecoder().decode(DeviceAuthorizationResponse.self, from: data)
+                return try await exchangeAuthorizationCode(code)
+            } catch CodexUsageError.httpStatus(403), CodexUsageError.httpStatus(404) {
+                if deviceCode.interval > 0 {
+                    try await Task.sleep(for: .seconds(deviceCode.interval))
+                }
+            }
+        }
+        throw CodexUsageError.authorizationExpired
+    }
+
+    public func refresh(refreshToken: String, accountID: String?) async throws -> CodexOAuthTokens {
+        let request = try jsonRequest(
+            path: "/oauth/token",
+            body: [
+                "client_id": Self.clientID,
+                "grant_type": "refresh_token",
+                "refresh_token": refreshToken
+            ]
+        )
+        let response = try JSONDecoder().decode(TokenResponse.self, from: try await send(request))
+        guard let accessToken = response.accessToken, !accessToken.isEmpty else {
+            throw CodexUsageError.invalidResponse
+        }
+        return CodexOAuthTokens(
+            accessToken: accessToken,
+            refreshToken: response.refreshToken?.nonEmpty ?? refreshToken,
+            accountID: extractAccountID(from: response.idToken ?? accessToken) ?? accountID
+        )
+    }
+
+    private func exchangeAuthorizationCode(_ code: DeviceAuthorizationResponse) async throws -> CodexOAuthTokens {
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "grant_type", value: "authorization_code"),
+            URLQueryItem(name: "code", value: code.authorizationCode),
+            URLQueryItem(name: "redirect_uri", value: issuer.appending(path: "deviceauth/callback").absoluteString),
+            URLQueryItem(name: "client_id", value: Self.clientID),
+            URLQueryItem(name: "code_verifier", value: code.codeVerifier)
+        ]
+        var request = URLRequest(url: issuer.appending(path: "oauth/token"))
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data((components.percentEncodedQuery ?? "").utf8)
+        let response = try JSONDecoder().decode(TokenResponse.self, from: try await send(request))
+        guard let accessToken = response.accessToken?.nonEmpty,
+              let refreshToken = response.refreshToken?.nonEmpty else {
+            throw CodexUsageError.invalidResponse
+        }
+        return CodexOAuthTokens(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            accountID: extractAccountID(from: response.idToken ?? accessToken)
+        )
+    }
+
+    private func jsonRequest(path: String, body: [String: String]) throws -> URLRequest {
+        var request = URLRequest(url: issuer.appending(path: path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        return request
+    }
+
+    private func send(_ request: URLRequest) async throws -> Data {
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw CodexUsageError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                throw CodexUsageError.httpStatus(http.statusCode)
+            }
+            return data
+        } catch let error as CodexUsageError {
+            throw error
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw CodexUsageError.transport
+        }
+    }
+
+    private func extractAccountID(from token: String) -> String? {
+        let parts = token.split(separator: ".")
+        guard parts.count > 1 else { return nil }
+        var encoded = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
+        guard let data = Data(base64Encoded: encoded),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let auth = payload["https://api.openai.com/auth"] as? [String: Any] else { return nil }
+        return (auth["chatgpt_account_id"] as? String)?.nonEmpty
+    }
+}
+
+private struct DeviceCodeResponse: Decodable {
+    let deviceAuthID: String
+    let userCode: String
+    let interval: TimeInterval
+
+    enum CodingKeys: String, CodingKey {
+        case deviceAuthID = "device_auth_id"
+        case userCode = "user_code"
+        case usercode
+        case interval
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        deviceAuthID = try values.decode(String.self, forKey: .deviceAuthID)
+        userCode = try values.decodeIfPresent(String.self, forKey: .userCode)
+            ?? values.decode(String.self, forKey: .usercode)
+        if let string = try? values.decode(String.self, forKey: .interval) {
+            interval = TimeInterval(string) ?? 5
+        } else {
+            interval = try values.decodeIfPresent(TimeInterval.self, forKey: .interval) ?? 5
+        }
+    }
+}
+
+private struct DeviceAuthorizationResponse: Decodable {
+    let authorizationCode: String
+    let codeVerifier: String
+
+    enum CodingKeys: String, CodingKey {
+        case authorizationCode = "authorization_code"
+        case codeVerifier = "code_verifier"
+    }
+}
+
+private struct TokenResponse: Decodable {
+    let idToken: String?
+    let accessToken: String?
+    let refreshToken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case idToken = "id_token"
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+    }
+}
+
 public enum CodexUsageError: Error, Equatable, LocalizedError, Sendable {
     case missingCredential
     case invalidResponse
+    case authorizationExpired
     case httpStatus(Int)
     case keychain(OSStatus)
     case transport
@@ -336,17 +610,23 @@ public enum CodexUsageError: Error, Equatable, LocalizedError, Sendable {
         case .missingCredential:
             return "等待 Mac 同步凭证"
         case .httpStatus(401), .httpStatus(403):
-            return "凭证已过期，请在 Mac 上打开 Codex"
+            return "凭证已过期，请在 App 中登录 Codex"
         case let .httpStatus(status):
             return "读取失败：HTTP \(status)"
         case .invalidResponse:
             return "用量数据格式异常"
+        case .authorizationExpired:
+            return "登录已超时，请重试"
         case let .keychain(status):
             return "iCloud 凭证读取失败（\(status)）"
         case .transport:
             return "网络连接失败"
         }
     }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }
 
 private func parseISODate(_ value: String?) -> Date? {

@@ -1,5 +1,6 @@
 import CodexUsageCore
 import SwiftUI
+import UIKit
 import WidgetKit
 
 private let appGroup = "group.com.zhaoxh.codexusage"
@@ -21,9 +22,11 @@ final class DashboardModel: ObservableObject {
     @Published var snapshot: UsageSnapshot?
     @Published var status: String?
     @Published var isRefreshing = false
+    @Published var hasIndependentLogin = false
 
     private let sampleMode = ProcessInfo.processInfo.arguments.contains("--sample-data")
     private let service = CodexUsageService()
+    private let oauth = CodexOAuthService()
     private let cache = SnapshotStore(suiteName: appGroup)
 
     init() {
@@ -32,6 +35,7 @@ final class DashboardModel: ObservableObject {
         } else if let cache {
             snapshot = try? cache.load()
         }
+        hasIndependentLogin = (try? Self.refreshTokenStore.load()) != nil
     }
 
     func refresh() async {
@@ -49,8 +53,7 @@ final class DashboardModel: ObservableObject {
         }
 
         do {
-            let credential = try KeychainCredentialStore(accessGroup: Self.keychainAccessGroup).load()
-            let fresh = try await service.fetch(credential: credential)
+            let fresh = try await fetchWithAutomaticRefresh()
             try cache?.save(fresh)
             withAnimation(.easeOut(duration: 0.24)) {
                 snapshot = fresh
@@ -62,8 +65,73 @@ final class DashboardModel: ObservableObject {
         }
     }
 
+    func requestDeviceCode() async throws -> CodexDeviceCode {
+        try await oauth.requestDeviceCode()
+    }
+
+    func completeLogin(_ deviceCode: CodexDeviceCode) async throws {
+        let tokens = try await oauth.completeDeviceCode(deviceCode)
+        try save(tokens)
+        hasIndependentLogin = true
+        await refresh()
+    }
+
+    func disconnectIndependentLogin() {
+        try? Self.mobileCredentialStore.delete()
+        try? Self.refreshTokenStore.delete()
+        hasIndependentLogin = false
+    }
+
+    private func fetchWithAutomaticRefresh() async throws -> UsageSnapshot {
+        let credential = try loadCredential()
+        do {
+            return try await service.fetch(credential: credential)
+        } catch CodexUsageError.httpStatus(401), CodexUsageError.httpStatus(403) {
+            guard let refreshToken = try? Self.refreshTokenStore.load() else {
+                throw CodexUsageError.httpStatus(401)
+            }
+            do {
+                let tokens = try await oauth.refresh(
+                    refreshToken: refreshToken,
+                    accountID: credential.accountID
+                )
+                try save(tokens)
+                return try await service.fetch(credential: tokens.credential)
+            } catch CodexUsageError.httpStatus(401), CodexUsageError.httpStatus(403) {
+                disconnectIndependentLogin()
+                throw CodexUsageError.authorizationExpired
+            }
+        }
+    }
+
+    private func loadCredential() throws -> CodexCredential {
+        if let mobile = try? Self.mobileCredentialStore.load() { return mobile }
+        return try Self.syncedCredentialStore.load()
+    }
+
+    private func save(_ tokens: CodexOAuthTokens) throws {
+        try Self.refreshTokenStore.save(tokens.refreshToken)
+        try Self.mobileCredentialStore.save(tokens.credential)
+    }
+
     private static var keychainAccessGroup: String? {
         Bundle.main.object(forInfoDictionaryKey: "CodexUsageKeychainAccessGroup") as? String
+    }
+
+    private static var mobileCredentialStore: KeychainCredentialStore {
+        KeychainCredentialStore(
+            accessGroup: keychainAccessGroup,
+            service: CodexKeychainService.mobileCredential,
+            synchronizable: false
+        )
+    }
+
+    private static var syncedCredentialStore: KeychainCredentialStore {
+        KeychainCredentialStore(accessGroup: keychainAccessGroup)
+    }
+
+    private static var refreshTokenStore: KeychainSecretStore {
+        KeychainSecretStore(service: CodexKeychainService.mobileRefreshToken)
     }
 }
 
@@ -71,6 +139,7 @@ struct DashboardScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var model: DashboardModel
     @State private var creditsExpanded = true
+    @State private var showingLogin = false
 
     var body: some View {
         NavigationStack {
@@ -96,6 +165,12 @@ struct DashboardScreen: View {
             .navigationTitle("Codex 用量")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showingLogin = true } label: {
+                        Image(systemName: model.hasIndependentLogin ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.plus")
+                    }
+                    .accessibilityLabel(model.hasIndependentLogin ? "手机已登录 Codex" : "登录 Codex")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await model.refresh() }
@@ -112,6 +187,9 @@ struct DashboardScreen: View {
             .task(id: scenePhase) {
                 guard scenePhase == .active else { return }
                 await model.refresh()
+            }
+            .sheet(isPresented: $showingLogin) {
+                CodexLoginSheet(model: model)
             }
         }
     }
@@ -229,6 +307,92 @@ struct DashboardScreen: View {
     }
 }
 
+private struct CodexLoginSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @ObservedObject var model: DashboardModel
+    @State private var deviceCode: CodexDeviceCode?
+    @State private var error: String?
+    @State private var loginAttempt = 0
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 22) {
+                if model.hasIndependentLogin {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 42))
+                        .foregroundStyle(.green)
+                    Text("此 iPhone 已独立登录 Codex")
+                        .font(.headline)
+                    Button("退出手机登录", role: .destructive) {
+                        model.disconnectIndependentLogin()
+                        deviceCode = nil
+                        error = nil
+                        loginAttempt += 1
+                    }
+                } else if let deviceCode {
+                    VStack(spacing: 8) {
+                        Text("一次性验证码")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(deviceCode.userCode)
+                            .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    Button {
+                        UIPasteboard.general.string = deviceCode.userCode
+                    } label: {
+                        Label("复制验证码", systemImage: "doc.on.doc")
+                    }
+                    Button {
+                        openURL(deviceCode.verificationURL)
+                    } label: {
+                        Label("打开 OpenAI 登录", systemImage: "safari")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    ProgressView("等待授权")
+                } else if let error {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 34))
+                        .foregroundStyle(.orange)
+                    Text(error)
+                        .multilineTextAlignment(.center)
+                    Button("重试") {
+                        self.error = nil
+                        loginAttempt += 1
+                    }
+                } else {
+                    ProgressView("正在创建登录请求")
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: .infinity, minHeight: 300)
+            .navigationTitle("登录 Codex")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+            .task(id: loginAttempt) {
+                guard error == nil, !model.hasIndependentLogin, deviceCode == nil else { return }
+                do {
+                    let code = try await model.requestDeviceCode()
+                    deviceCode = code
+                    try await model.completeLogin(code)
+                    dismiss()
+                } catch is CancellationError {
+                    return
+                } catch {
+                    deviceCode = nil
+                    self.error = (error as? LocalizedError)?.errorDescription ?? "登录失败"
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
 private struct SummaryHeader: View {
     let snapshot: UsageSnapshot
 
@@ -255,13 +419,23 @@ private struct SummaryHeader: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 12) {
-                SummaryMetric(
-                    icon: "calendar",
-                    title: secondary?.title ?? "本周",
-                    value: "\(Int((secondary?.remainingPercent ?? 0).rounded()))%",
-                    tint: remainingColor(secondary?.remainingPercent ?? 0)
-                )
-                Divider()
+                if let secondary {
+                    SummaryMetric(
+                        icon: "calendar",
+                        title: secondary.title,
+                        value: "\(Int(secondary.remainingPercent.rounded()))%",
+                        tint: remainingColor(secondary.remainingPercent)
+                    )
+                    Divider()
+                } else if let resetsAt = primary?.resetsAt {
+                    SummaryMetric(
+                        icon: "clock",
+                        title: "下次重置",
+                        value: compactDate(resetsAt),
+                        tint: .primary
+                    )
+                    Divider()
+                }
                 SummaryMetric(
                     icon: "arrow.counterclockwise",
                     title: "可用重置",
@@ -301,6 +475,7 @@ private struct SummaryMetric: View {
                     .monospacedDigit()
                     .contentTransition(.numericText())
                     .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
         }
     }

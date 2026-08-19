@@ -34,11 +34,18 @@
 - Widget 请求约 30 分钟后刷新，但 iOS 可以延后或合并调度。
 - Widget 显示 `缓存` 时，说明本次网络或凭证刷新失败，画面来自上一次成功快照。
 
+### iPhone 独立登录
+
+- 主 App 可通过 Codex device-code 流程建立独立于 Mac 的 OAuth 会话。
+- 手机 access token 使用独立的非同步 Keychain service，避免被 Mac HUD 覆盖。
+- 用量请求遇到 401/403 时，主 App 使用 refresh token 刷新一次并重试。
+- Widget 不读取 refresh token、不执行 OAuth 刷新；失败时继续显示缓存。
+
 ## 安全决策
 
 - 不把完整 Codex session 或 `auth.json` 同步到 iPhone。
-- 不同步 `refresh_token`，避免手机获得长期刷新 Codex 会话的能力。
-- 只同步 `access_token`、`account_id` 和 `last_refresh`。
+- Mac 只同步 `access_token`、`account_id` 和 `last_refresh`，不向手机同步 Mac refresh token。
+- iPhone 独立登录的 refresh token 仅存主 App 私有、本机 Keychain，不进入共享 Keychain 或 App Group。
 - 凭证使用 `kSecAttrSynchronizable` 的 Keychain 条目，并限制在共享 Keychain group。
 - 文档、截图、测试样例和构建日志不得包含真实凭证。
 

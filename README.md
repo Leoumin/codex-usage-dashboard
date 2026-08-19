@@ -54,7 +54,8 @@ outputs/install-codex-usage-hud-launcher.sh
 
 ## 安全边界
 
-项目不会把 Codex 的 `refresh_token` 同步到手机。iCloud Keychain 中只保存展示用的
-`access_token`、`account_id` 和 `last_refresh`，真实凭证不得进入源码、文档或日志。
+Mac 不会把 Codex 的 `refresh_token` 同步到手机。iPhone 独立登录后，自己的
+`refresh_token` 仅保存在主 App 私有、本机 Keychain；不会进入共享 Keychain、
+App Group、Widget、源码、文档或日志。
 
 当前实现与已确认决策见 [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md)。

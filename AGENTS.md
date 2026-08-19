@@ -11,7 +11,7 @@
 
 - 这是个人使用的只读 Codex 用量仪表盘，不做账号体系、服务端或多人共享。
 - macOS 悬浮窗、iOS 主应用和 Widget 必须共享同一套用量模型与解析逻辑。
-- 第一版只同步展示用凭证，不在 iPhone 上接管 Codex 会话刷新。
+- iPhone 可使用独立设备码登录并刷新自己的 Codex 会话，不接管或覆盖 Mac Codex 会话。
 
 ## 架构
 
@@ -24,7 +24,8 @@
 ## 不可破坏的约束
 
 - 绝不记录、提交或展示真实 access token。
-- iCloud Keychain 只同步 `access_token`、`account_id` 和 `last_refresh`；绝不同步 `refresh_token`。
+- Mac 到 iCloud Keychain 仍只同步 `access_token`、`account_id` 和 `last_refresh`。
+- iPhone 独立登录的 `refresh_token` 只存主 App 私有、本机 Keychain，不进入共享 Keychain、App Group、Widget、日志或源码。
 - Keychain group 保持 `$(AppIdentifierPrefix)com.zhaoxh.codexusage.shared`。
 - App Group 保持 `group.com.zhaoxh.codexusage`。
 - Apple Team 保持 `AXX22S6S2N`，除非用户明确更换签名账号。
