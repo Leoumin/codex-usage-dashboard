@@ -5,6 +5,12 @@ import WidgetKit
 private let widgetKind = "CodexUsageWidget"
 private let appGroup = "group.com.zhaoxh.codexusage"
 
+#if os(macOS)
+private func widgetSnapshotStore() -> SnapshotStore { SnapshotStore(defaults: .standard) }
+#else
+private func widgetSnapshotStore() -> SnapshotStore { SnapshotStore(suiteName: appGroup)! }
+#endif
+
 struct UsageEntry: TimelineEntry {
     let date: Date
     let snapshot: UsageSnapshot?
@@ -48,7 +54,7 @@ struct UsageProvider: TimelineProvider {
                 credential = try KeychainCredentialStore(accessGroup: accessGroup).load()
             }
             let fresh = try await CodexUsageService().fetch(credential: credential)
-            try SnapshotStore(suiteName: appGroup)?.save(fresh)
+            try widgetSnapshotStore().save(fresh)
             return UsageEntry(date: Date(), snapshot: fresh, status: nil)
         } catch {
             return UsageEntry(
@@ -60,8 +66,7 @@ struct UsageProvider: TimelineProvider {
     }
 
     private func cachedSnapshot() -> UsageSnapshot? {
-        guard let store = SnapshotStore(suiteName: appGroup) else { return nil }
-        return try? store.load()
+        try? widgetSnapshotStore().load()
     }
 }
 

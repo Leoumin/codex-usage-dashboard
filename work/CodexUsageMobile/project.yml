@@ -25,12 +25,13 @@ targets:
         buildPhase: resources
     dependencies:
       - package: CodexUsageCore
+      - target: CodexUsageMacWidget
     info:
       path: Config/CodexUsageHUD-Info.plist
       properties:
         CFBundleDisplayName: Codex 用量
         CFBundleIconFile: CodexUsageHUD
-        LSMinimumSystemVersion: "13.0"
+        LSMinimumSystemVersion: "14.0"
         LSUIElement: true
         NSHighResolutionCapable: true
         CodexUsageKeychainAccessGroup: $(AppIdentifierPrefix)com.zhaoxh.codexusage.shared
@@ -43,6 +44,43 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhaoxh.CodexUsageHUD
         CODE_SIGN_STYLE: Automatic
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+  CodexUsageMacWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Widget
+        excludes:
+          - Info.plist
+          - MacInfo.plist
+      - path: Resources/Geist-VariableFont_wght.ttf
+        buildPhase: resources
+    dependencies:
+      - package: CodexUsageCore
+    info:
+      path: Widget/MacInfo.plist
+      properties:
+        CFBundleDisplayName: Codex 用量
+        CodexUsageKeychainAccessGroup: $(AppIdentifierPrefix)com.zhaoxh.codexusage.shared
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        UIAppFonts:
+          - Geist-VariableFont_wght.ttf
+    entitlements:
+      path: Config/CodexUsageMacWidget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.zhaoxh.codexusage.shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhaoxh.CodexUsageHUD.Widget
+        CODE_SIGN_STYLE: Automatic
+        APPLICATION_EXTENSION_API_ONLY: true
+        SKIP_INSTALL: true
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
 
   CodexUsage:
     type: application

@@ -4,7 +4,8 @@
 
 ## 当前成果
 
-- macOS HUD 已签名并安装在 `~/Applications/CodexUsageHUD.app`。
+- macOS 无窗口 Widget 宿主已签名并安装在 `~/Applications/CodexUsageHUD.app`。
+- macOS Widget 扩展 bundle ID 为 `com.zhaoxh.CodexUsageHUD.Widget`。
 - LaunchAgent `local.codex.usage-hud.follow-codex` 已启用。
 - iOS App 与 Widget 已完成真机签名、安装和桌面验证。
 - iOS App 已配置自定义 App Icon，源文件位于
@@ -15,13 +16,12 @@
 
 ### macOS
 
-- HUD 读取 `~/.codex/auth.json`，请求 ChatGPT 的用量与重置额度接口。
-- 启动环境没有代理变量时，会通过 `scutil --proxy` 读取系统 HTTP、HTTPS 或 SOCKS 代理。
-- HUD 使用 RunLoop 上的 `Timer` 每 60 秒触发一次刷新，刷新本身不会持续占用 CPU。
-- LaunchAgent 每 20 秒检查一次 Codex 与 HUD 进程；HUD 未运行时会静默同步最新凭证，但不请求用量。
-- 关闭按钮会写入当前 Codex 会话的关闭标记，防止 LaunchAgent 立即重新拉起 HUD。
-- 关闭标记只阻止浮窗显示，不会停止凭证同步。
-- Codex 完全退出后关闭标记被清除，下次启动 Codex 时 HUD 会再次出现。
+- 宿主读取 `~/.codex/auth.json`，同步最小凭证到共享 Keychain，并通知 WidgetKit 刷新。
+- macOS Widget 在沙箱内直接请求用量接口，使用系统网络代理和自身 UserDefaults 缓存。
+- macOS Widget 不访问 `group.com.zhaoxh.codexusage`，避免触发“访问其他 App 数据”权限提示。
+- LaunchAgent 每 60 秒检查 Codex/ChatGPT；运行时执行一次凭证同步后退出。
+- 宿主默认启动不创建窗口、Dock 图标或菜单栏项目。
+- Widget 由 WidgetKit 调度，并在实时刷新失败时展示最后一次成功快照。
 
 ### iOS 与 Widget
 
@@ -51,7 +51,7 @@
 
 ## 视觉方向
 
-- macOS HUD：轻量、紧凑、低干扰，与 Codex 桌面客户端的用量信息层级一致。
+- macOS Widget：轻量、紧凑、低干扰，与 Codex 桌面客户端的用量信息层级一致。
 - Widget：深色背景、白色标题、青色主数值、琥珀色异常状态。
 - 中号 Widget 的核心顺序为：标题与状态、周剩余、进度与重置时间、可用重置次数。
 - `docs/assets` 保存 macOS 视觉迭代截图；`outputs/codex-usage-ios-preview.png` 保存 iOS 预览。

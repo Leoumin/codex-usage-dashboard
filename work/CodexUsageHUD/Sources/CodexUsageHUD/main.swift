@@ -2,6 +2,7 @@ import AppKit
 import CodexUsageCore
 import Foundation
 import SwiftUI
+import WidgetKit
 
 struct LimitWindow: Identifiable, Sendable {
     let id = UUID()
@@ -277,6 +278,11 @@ enum DashboardFetcher {
         let store = KeychainCredentialStore(accessGroup: keychainAccessGroup)
         if let stored = try? store.load(), stored == credential { return }
         try store.save(credential)
+    }
+
+    static func refreshWidget() throws {
+        try syncCredential()
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     static func readBackendJSON(_ endpoint: String, accessToken: String) throws -> [String: Any] {
@@ -589,7 +595,10 @@ if CommandLine.arguments.contains("--sync-credential") {
     }
 }
 
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
+do {
+    try DashboardFetcher.refreshWidget()
+    exit(0)
+} catch {
+    fputs("Widget refresh failed: \(error)\n", stderr)
+    exit(1)
+}

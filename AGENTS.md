@@ -16,7 +16,7 @@
 ## 架构
 
 - `work/CodexUsageCore`：凭证模型、Keychain、接口请求、响应解析和快照缓存。
-- `work/CodexUsageHUD`：macOS AppKit/SwiftUI 悬浮窗。
+- `work/CodexUsageHUD`：macOS 无窗口 Widget 宿主与快照刷新器。
 - `work/CodexUsageMobile`：XcodeGen 工程，包含 iOS App、WidgetKit 和 macOS 签名目标。
 - `outputs`：已签名 macOS App、iOS 安装包和安装脚本。
 - `docs/PROJECT_CONTEXT.md`：已确认的产品决策和当前状态。
@@ -29,9 +29,9 @@
 - Keychain group 保持 `$(AppIdentifierPrefix)com.zhaoxh.codexusage.shared`。
 - App Group 保持 `group.com.zhaoxh.codexusage`。
 - Apple Team 保持 `AXX22S6S2N`，除非用户明确更换签名账号。
-- macOS HUD 必须读取系统代理或代理环境变量，避免启动环境缺少 HTTP 代理时出现超时。
-- macOS HUD 每 60 秒刷新；LaunchAgent 每 20 秒只检查 Codex 是否运行及 HUD 是否需要拉起。
-- 用户关闭 HUD 后，本次 Codex 会话内不得自动重开；Codex 完全退出后才清除关闭标记。
+- macOS Widget 扩展必须启用 App Sandbox 与出站网络权限，并使用自身沙箱缓存；不得访问 iOS App Group。
+- LaunchAgent 每 60 秒检查 Codex 是否运行；运行时同步一次共享 Keychain 凭证并通知 Widget 刷新后退出。
+- macOS 宿主不得创建悬浮窗、Dock 图标或菜单栏常驻项。
 - Widget 的 `缓存` 表示实时刷新失败，当前显示上一次成功保存的数据，不代表数据无效。
 - WidgetKit 的刷新时间由系统调度；代码中的 30 分钟是请求时间，不是精确定时器。
 

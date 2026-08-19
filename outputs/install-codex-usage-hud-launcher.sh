@@ -33,22 +33,17 @@ import sys
 
 plist_path, app_path = sys.argv[1], sys.argv[2]
 command = (
-    f'state="$HOME/.codex/codex-usage-hud-dismissed-session"; '
     f'executable="{app_path}/Contents/MacOS/CodexUsageHUD"; '
     f'session="$(/bin/ps -axo pid=,args= | /usr/bin/awk \'BEGIN {{ needle = "/" "Applications/Codex.app/Contents/MacOS/Codex" }} index($0, needle) {{ print $1; exit }}\')"; '
     f'[[ -n "$session" ]] || session="$(/bin/ps -axo pid=,args= | /usr/bin/awk \'BEGIN {{ needle = "/" "Applications/ChatGPT.app/Contents/MacOS/ChatGPT" }} index($0, needle) {{ print $1; exit }}\')"; '
     f'[[ -n "$session" ]] || session="$(/bin/ps -axo pid=,args= | /usr/bin/awk \'BEGIN {{ needle = "/" "Applications/ChatGPT.app/Contents/Resources/codex" }} index($0, needle) {{ print $1; exit }}\')"; '
-    f'if [[ -n "$session" ]]; then '
-    f'/usr/bin/pgrep -x CodexUsageHUD >/dev/null 2>&1 || {{ '
-    f'"$executable" --sync-credential; '
-    f'[[ -f "$state" ]] || /usr/bin/open -g "{app_path}"; '
-    f'}}; else /bin/rm -f "$state"; fi'
+    f'if [[ -n "$session" ]]; then "$executable" --refresh-widget; fi'
 )
 payload = {
     "Label": "local.codex.usage-hud.follow-codex",
     "ProgramArguments": ["/bin/zsh", "-lc", command],
     "RunAtLoad": True,
-    "StartInterval": 20,
+    "StartInterval": 60,
 }
 with open(plist_path, "wb") as f:
     plistlib.dump(payload, f)

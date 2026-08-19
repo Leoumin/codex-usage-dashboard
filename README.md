@@ -1,12 +1,12 @@
 # Codex Usage Dashboard
 
-个人使用的 Codex 用量仪表盘，包含 macOS 悬浮窗、iOS 主应用和桌面 Widget。
+个人使用的 Codex 用量仪表盘，包含 macOS 桌面 Widget、iOS 主应用和桌面 Widget。
 
 ## 功能
 
 - 展示 5 小时、周等用量窗口的剩余百分比与重置时间。
 - 展示可用重置次数及每次重置额度的到期时间。
-- macOS HUD 跟随 Codex 启动，每 60 秒自动刷新。
+- macOS 无窗口宿主每 60 秒同步一次凭证，桌面 Widget 由系统刷新。
 - Mac 将最小化凭证通过 iCloud Keychain 同步到 iPhone。
 - iOS App 支持手动刷新；Widget 使用系统时间线刷新并在失败时回退到缓存。
 
@@ -14,8 +14,8 @@
 
 ```text
 work/CodexUsageCore    共享模型、网络、Keychain 与缓存
-work/CodexUsageHUD     macOS 悬浮窗源码
-work/CodexUsageMobile  iOS App、Widget 和 XcodeGen 工程
+work/CodexUsageHUD     macOS 无窗口 Widget 宿主
+work/CodexUsageMobile  iOS App、iOS/macOS Widget 和 XcodeGen 工程
 outputs                已构建产物与 macOS 安装脚本
 docs                   设计、计划、截图与项目上下文
 ```
@@ -43,14 +43,15 @@ xcodebuild \
   build
 ```
 
-## 安装 macOS HUD
+## 安装 macOS 桌面组件宿主
 
 ```bash
 outputs/install-codex-usage-hud-launcher.sh
 ```
 
-脚本默认安装同目录的 `CodexUsageHUD.app` 到 `~/Applications`，并更新
-`local.codex.usage-hud.follow-codex` LaunchAgent。
+脚本默认安装同目录的 `CodexUsageHUD.app` 到 `~/Applications`，注册内嵌的
+macOS Widget，并更新 `local.codex.usage-hud.follow-codex` LaunchAgent。宿主
+无窗口运行，每次刷新完成后立即退出。
 
 ## 安全边界
 
