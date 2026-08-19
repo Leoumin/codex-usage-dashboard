@@ -1,0 +1,14 @@
+.DS_Store
+.omx/
+outputs/*.app/
+outputs/*-device.zip
+**/.build/
+**/.swiftpm/
+**/.derived/
+**/.derived-mac/
+**/DerivedData/
+**/*.xcodeproj/
+**/xcuserdata/
+*.xcuserstate
+*.mobileprovision
+*.provisionprofile

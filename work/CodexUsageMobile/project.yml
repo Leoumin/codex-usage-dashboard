@@ -1,0 +1,116 @@
+name: CodexUsageMobile
+
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "13.0"
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: AXX22S6S2N
+    SWIFT_VERSION: "6.0"
+
+packages:
+  CodexUsageCore:
+    path: ../CodexUsageCore
+
+targets:
+  CodexUsageHUD:
+    type: application
+    platform: macOS
+    sources:
+      - path: ../CodexUsageHUD/Sources/CodexUsageHUD
+      - path: Resources/CodexUsageHUD.icns
+        buildPhase: resources
+    dependencies:
+      - package: CodexUsageCore
+    info:
+      path: Config/CodexUsageHUD-Info.plist
+      properties:
+        CFBundleDisplayName: Codex 用量
+        CFBundleIconFile: CodexUsageHUD
+        LSMinimumSystemVersion: "13.0"
+        LSUIElement: true
+        NSHighResolutionCapable: true
+        CodexUsageKeychainAccessGroup: $(AppIdentifierPrefix)com.zhaoxh.codexusage.shared
+    entitlements:
+      path: Config/CodexUsageHUD.entitlements
+      properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.zhaoxh.codexusage.shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhaoxh.CodexUsageHUD
+        CODE_SIGN_STYLE: Automatic
+
+  CodexUsage:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Resources/Geist-VariableFont_wght.ttf
+        buildPhase: resources
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
+    dependencies:
+      - package: CodexUsageCore
+      - target: CodexUsageWidget
+    info:
+      path: Config/CodexUsage-Info.plist
+      properties:
+        CFBundleDisplayName: Codex 用量
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIAppFonts:
+          - Geist-VariableFont_wght.ttf
+        CodexUsageKeychainAccessGroup: $(AppIdentifierPrefix)com.zhaoxh.codexusage.shared
+    entitlements:
+      path: Config/CodexUsage.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.zhaoxh.codexusage
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.zhaoxh.codexusage.shared
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhaoxh.CodexUsage
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
+
+  CodexUsageWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widget
+        excludes:
+          - Info.plist
+      - path: Resources/Geist-VariableFont_wght.ttf
+        buildPhase: resources
+    dependencies:
+      - package: CodexUsageCore
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: Codex 用量
+        CodexUsageKeychainAccessGroup: $(AppIdentifierPrefix)com.zhaoxh.codexusage.shared
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        UIAppFonts:
+          - Geist-VariableFont_wght.ttf
+    entitlements:
+      path: Config/CodexUsageWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.zhaoxh.codexusage
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.zhaoxh.codexusage.shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhaoxh.CodexUsage.Widget
+        CODE_SIGN_STYLE: Automatic
+        APPLICATION_EXTENSION_API_ONLY: true
+        SKIP_INSTALL: true
+        TARGETED_DEVICE_FAMILY: "1"
